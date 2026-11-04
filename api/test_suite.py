@@ -1,4 +1,4 @@
-from app import app, calculate_annualized_closure_rate
+from api.app import app, calculate_annualized_closure_rate
 
 
 def test_annualized_closure_rate_formula():
