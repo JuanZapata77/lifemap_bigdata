@@ -1,7 +1,7 @@
 import os
 import re
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from pymongo import MongoClient
 
 app = Flask(__name__)
@@ -17,6 +17,11 @@ def calculate_annualized_closure_rate(closures: int, business_days: float) -> fl
         return 0.0
     return round((closures / (business_days / 365.0)) * 100.0, 4)
 
+
+
+@app.route("/", methods=["GET"])
+def index():
+    return render_template("index.html")
 
 # 1. GET /health (E1.2)
 @app.route("/health", methods=["GET"])
@@ -164,7 +169,10 @@ def predict():
 
     # Check if Spark exported vocabulary weights to MongoDB, otherwise fallback lexicon
     tokens = re.findall(r"[a-z]+", text.lower())
-    model_doc = db.model_metadata.find_one({"model_name": "sentiment_v1"})
+    try:
+        model_doc = db.model_metadata.find_one({"model_name": "sentiment_v1"})
+    except Exception:
+        model_doc = None
     if model_doc and "token_weights" in model_doc:
         weights = model_doc["token_weights"]
         score = sum(weights.get(t, 0.0) for t in tokens)

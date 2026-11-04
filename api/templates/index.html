@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LifeMap · Big Data IUE 2026-2</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; }
+    .max-w { max-width: 1280px; margin: 0 auto; }
+    .grid { display: grid; gap: 24px; }
+    .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    @media (max-width: 1024px) { .lg-grid-3 { grid-template-columns: 1fr; } }
+    .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+    .flex { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    h1 { font-size: 24px; font-weight: bold; color: #34d399; margin: 0 0 4px 0; }
+    h2 { font-size: 18px; font-weight: 600; color: #34d399; margin: 0 0 12px 0; }
+    p { font-size: 14px; color: #94a3b8; margin: 0; }
+    input, textarea { width: 100%; background: #0f172a; border: 1px solid #475569; color: #fff; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; font-size: 14px; margin-top: 8px; }
+    button { background: #059669; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; margin-top: 8px; }
+    button:hover { background: #10b981; }
+    button.indigo { background: #4f46e5; } button.indigo:hover { background: #6366f1; }
+    button.amber { background: #d97706; } button.amber:hover { background: #f59e0b; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
+    th { color: #94a3b8; border-bottom: 1px solid #334155; padding-bottom: 8px; font-weight: 600; }
+    td { padding: 8px 0; border-bottom: 1px solid #1e293b; }
+    code { font-family: monospace; color: #fcd34d; background: #0f172a; padding: 2px 6px; border-radius: 4px; }
+    #map { height: 460px; border-radius: 8px; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div class="max-w" style="display: flex; flex-direction: column; gap: 24px;">
+    <!-- Header -->
+    <div class="card flex">
+      <div>
+        <h1>LifeMap: Business Reputation, Location & Survival</h1>
+        <p>Click anywhere on the Philadelphia map to query <code>$near</code> & <code>$geoNear</code></p>
+      </div>
+      <div id="health-badge" style="font-family: monospace; font-size: 12px; background: #0f172a; padding: 10px 14px; border-radius: 8px; border: 1px solid #334155;">
+        Checking /health...
+      </div>
+    </div>
+
+    <!-- Map & Sidebar -->
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px;" class="lg-grid-3">
+      <div class="card" style="padding: 12px;">
+        <div id="map"></div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        <!-- Zone Summary -->
+        <div class="card">
+          <h2>Zone Summary (<code>/zones/summary</code>)</h2>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; margin-bottom: 12px;">
+            <div style="background: #0f172a; padding: 10px; border-radius: 8px;">
+              <div style="font-size: 11px; color: #94a3b8;">Businesses</div>
+              <div id="zone-total" style="font-size: 18px; font-weight: bold;">-</div>
+            </div>
+            <div style="background: #0f172a; padding: 10px; border-radius: 8px;">
+              <div style="font-size: 11px; color: #94a3b8;">Closure Rate</div>
+              <div id="zone-rate" style="font-size: 18px; font-weight: bold; color: #fb7185;">-</div>
+            </div>
+            <div style="background: #0f172a; padding: 10px; border-radius: 8px;">
+              <div style="font-size: 11px; color: #94a3b8;">Avg Sentiment</div>
+              <div id="zone-sent" style="font-size: 18px; font-weight: bold; color: #38bdf8;">-</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <input id="radius-input" type="number" value="3000" placeholder="Radius (m)" style="margin-top:0;">
+            <button onclick="loadMapData(currentLat, currentLon)">Update</button>
+          </div>
+          <button class="indigo" onclick="testPolygon()" style="width: 100%; margin-top: 10px;">Test Polygon (<code>POST /businesses/within</code>)</button>
+        </div>
+
+        <!-- Predictor -->
+        <div class="card">
+          <h2>Live Sentiment (<code>POST /predict</code>)</h2>
+          <textarea id="review-text" rows="2" placeholder="Type review...">Amazing food and super friendly staff!</textarea>
+          <button class="amber" onclick="predictSentiment()" style="width: 100%;">Classify Review</button>
+          <div id="predict-result" style="font-family: monospace; font-size: 12px; color: #cbd5e1; margin-top: 8px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MapReduce Tables -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="lg-grid-3">
+      <div class="card">
+        <h2>MapReduce by Category (<code>/stats/closure</code>)</h2>
+        <table>
+          <thead><tr><th>Category</th><th>Biz</th><th>Closed</th><th>Days</th><th>Rate (%)</th></tr></thead>
+          <tbody id="cat-table"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Top Geohash Cells (<code>/stats/closure</code>)</h2>
+        <table>
+          <thead><tr><th>Geohash</th><th>Biz</th><th>Closed</th><th>% Neg</th><th>Rate (%)</th></tr></thead>
+          <tbody id="geo-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentLat = 39.9526, currentLon = -75.1652;
+    const map = L.map('map').setView([currentLat, currentLon], 12);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+    let markersLayer = L.layerGroup().addTo(map);
+    let circleLayer = null;
+
+    map.on('click', (e) => {
+      currentLat = e.latlng.lat; currentLon = e.latlng.lng;
+      loadMapData(currentLat, currentLon);
+    });
+
+    async function loadHealth() {
+      const res = await fetch('/health');
+      const d = await res.json();
+      document.getElementById('health-badge').innerHTML =
+        `Status: <span style="color:#34d399; font-weight:bold;">${d.status}</span> | Commit: <span style="color:#fcd34d;">${d.commit_hash}</span> | Mongo: ${d.services.mongodb} | Spark: ${d.services.spark}`;
+    }
+
+    async function loadMapData(lat, lon) {
+      const radius = parseFloat(document.getElementById('radius-input').value || 3000);
+      markersLayer.clearLayers();
+      if (circleLayer) map.removeLayer(circleLayer);
+      circleLayer = L.circle([lat, lon], { radius, color: '#10b981', fillOpacity: 0.08 }).addTo(map);
+
+      const [nearRes, sumRes] = await Promise.all([
+        fetch(`/businesses/near?lat=${lat}&lon=${lon}&radius=${radius}`),
+        fetch(`/zones/summary?lat=${lat}&lon=${lon}&radius=${radius}`)
+      ]);
+      const nearData = await nearRes.json();
+      const sumData = await sumRes.json();
+
+      document.getElementById('zone-total').textContent = sumData.total_businesses;
+      document.getElementById('zone-rate').textContent = sumData.annualized_closure_rate_pct + '%';
+      document.getElementById('zone-sent').textContent = sumData.avg_sentiment;
+
+      (nearData.businesses || []).forEach(b => {
+        const [bLon, bLat] = b.location.coordinates;
+        const color = b.event === 1 ? '#fb7185' : '#38bdf8';
+        L.circleMarker([bLat, bLon], { radius: 6, color, fillColor: color, fillOpacity: 0.85 })
+          .bindPopup(`<b>${b.name}</b><br>Category: ${b.main_category}<br>Status: ${b.event === 1 ? 'CLOSED' : 'OPEN'}<br>Days: ${b.business_days}`)
+          .addTo(markersLayer);
+      });
+    }
+
+    async function testPolygon() {
+      const poly = { type: "Polygon", coordinates: [[[-75.20, 39.93], [-75.13, 39.93], [-75.13, 39.98], [-75.20, 39.98], [-75.20, 39.93]]] };
+      const res = await fetch('/businesses/within', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ polygon: poly }) });
+      const data = await res.json();
+      markersLayer.clearLayers();
+      if (circleLayer) map.removeLayer(circleLayer);
+      circleLayer = L.polygon([[39.93, -75.20], [39.93, -75.13], [39.98, -75.13], [39.98, -75.20]], { color: '#6366f1' }).addTo(map);
+      (data.businesses || []).forEach(b => {
+        const [bLon, bLat] = b.location.coordinates;
+        const color = b.event === 1 ? '#fb7185' : '#38bdf8';
+        L.circleMarker([bLat, bLon], { radius: 6, color, fillColor: color, fillOpacity: 0.85 }).bindPopup(`<b>${b.name}</b>`).addTo(markersLayer);
+      });
+    }
+
+    async function predictSentiment() {
+      const text = document.getElementById('review-text').value;
+      const res = await fetch('/predict', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text }) });
+      const d = await res.json();
+      document.getElementById('predict-result').textContent = `Prediction: ${d.predicted_sentiment?.toUpperCase()} (score: ${d.score})`;
+    }
+
+    async function loadStats() {
+      const [catRes, geoRes] = await Promise.all([
+        fetch('/stats/closure?by=category&min_business_days=365'),
+        fetch('/stats/closure?by=geohash&min_business_days=365')
+      ]);
+      const catData = await catRes.json();
+      const geoData = await geoRes.json();
+
+      document.getElementById('cat-table').innerHTML = (catData.results || []).map(r =>
+        `<tr><td><b>${r.category}</b></td><td>${r.n_businesses}</td><td>${r.closures}</td><td>${r.business_days}</td><td style="color:#fb7185; font-weight:bold;">${r.closure_rate_pct}%</td></tr>`
+      ).join('');
+
+      document.getElementById('geo-table').innerHTML = (geoData.results || []).slice(0, 8).map(r =>
+        `<tr><td><code style="color:#fcd34d;">${r.geohash}</code></td><td>${r.n_businesses}</td><td>${r.closures}</td><td>${r.pct_negative_reviews}%</td><td style="color:#fb7185; font-weight:bold;">${r.closure_rate_pct}%</td></tr>`
+      ).join('');
+    }
+
+    loadHealth(); loadMapData(currentLat, currentLon); loadStats();
+  </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+dask[complete]==2024.8.0
+distributed==2024.8.0
+pymongo==4.8.0
+kaggle>=1.8.2
+pygeohash==1.2.0
+pandas==2.2.2
+pyarrow==17.0.0
