@@ -45,7 +45,7 @@ def health():
     all_up = mongo_ok and dask_ok and spark_ok
     return jsonify({
         "status": "UP" if all_up else "DEGRADED",
-        "commit_hash": os.getenv("GIT_COMMIT", "local-dev"),
+        "commit_hash": open("/app/api/commit.txt").read().strip() if os.path.exists("/app/api/commit.txt") else os.getenv("GIT_COMMIT", "local-dev"),
         "services": {
             "mongodb": "UP" if mongo_ok else "DOWN",
             "dask": "UP" if dask_ok else "DOWN",
