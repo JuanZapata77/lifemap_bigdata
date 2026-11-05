@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timedelta
 import random
 import pandas as pd
+import dask
 import dask.dataframe as dd
 from dask.distributed import Client
 from pymongo import MongoClient, ASCENDING, GEOSPHERE
@@ -13,29 +14,54 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017/lifemap")
 DASK_SCHEDULER = os.getenv("DASK_SCHEDULER", "tcp://dask-scheduler:8786")
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 
-# Default Metro Area & Category Family (configurable via env vars or CLI)
 TARGET_CITY = os.getenv("TARGET_CITY", "Philadelphia")
 TARGET_CATEGORY = os.getenv("TARGET_CATEGORY", "Restaurants")
-MAX_REVIEWS = int(os.getenv("MAX_REVIEWS", "1000000"))
+MAX_REVIEWS = int(os.getenv("MAX_REVIEWS", "200000"))
 
 
 def download_kaggle_dataset():
-    """E1.4: Automated download from Kaggle API inside the pipeline."""
+    """E1.4: Automated download from Kaggle API inside the pipeline using pure Python urllib."""
+    import urllib.request, zipfile, shutil
+    os.makedirs(DATA_DIR, exist_ok=True)
     biz_path = os.path.join(DATA_DIR, "yelp_academic_dataset_business.json")
     rev_path = os.path.join(DATA_DIR, "yelp_academic_dataset_review.json")
+
+    if os.path.exists(biz_path) and os.path.getsize(biz_path) < 1_000_000:
+        print("[Kaggle] Removing small demo JSON files to download real Yelp dataset...")
+        os.remove(biz_path)
+        if os.path.exists(rev_path):
+            os.remove(rev_path)
+
     if os.path.exists(biz_path) and os.path.exists(rev_path):
-        print("[Kaggle] Dataset files already present in /data.")
+        print("[Kaggle] Real Yelp dataset files already present in /data.")
         return biz_path, rev_path
 
-    print("[Kaggle] Downloading yelp-dataset/yelp-dataset via Kaggle API...")
-    import kaggle
-    pass # kaggle>=1.8 auto-authenticates KAGGLE_API_TOKEN on import
-    kaggle.api.dataset_download_files("yelp-dataset/yelp-dataset", path=DATA_DIR, unzip=True)
+    token = os.getenv("KAGGLE_API_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("KAGGLE_API_TOKEN is empty! Run: export KAGGLE_API_TOKEN=your_KGAT_token")
+
+    zip_path = os.path.join(DATA_DIR, "yelp-dataset.zip")
+    if not os.path.exists(zip_path) or os.path.getsize(zip_path) < 100_000_000:
+        url = "https://www.kaggle.com/api/v1/datasets/download/yelp-dataset/yelp-dataset"
+        print(f"[Kaggle] Downloading {url} (~4.3 GB, please wait 3-6 minutes)...")
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req) as resp, open(zip_path, "wb") as out:
+            shutil.copyfileobj(resp, out, length=16*1024*1024)
+        print("[Kaggle] Download finished! Extracting business.json and review.json...")
+
+    with zipfile.ZipFile(zip_path, "r") as z:
+        for member in ["yelp_academic_dataset_business.json", "yelp_academic_dataset_review.json"]:
+            if member in z.namelist():
+                print(f"[Kaggle] Extracting {member}...")
+                z.extract(member, DATA_DIR)
+    if os.path.exists(zip_path):
+        os.remove(zip_path)
+    print("[Kaggle] Extraction complete!")
     return biz_path, rev_path
 
 
 def generate_demo_dataset():
-    """Generates realistic Yelp-structured JSONL files in /data for instant end-to-end verification."""
+    """Generates synthetic Yelp-structured JSONL files in /data for fast testing."""
     os.makedirs(DATA_DIR, exist_ok=True)
     biz_path = os.path.join(DATA_DIR, "yelp_academic_dataset_business.json")
     rev_path = os.path.join(DATA_DIR, "yelp_academic_dataset_review.json")
@@ -60,8 +86,7 @@ def generate_demo_dataset():
         "Portions were normal, price is fair, standard neighborhood place."
     ]
 
-    businesses = []
-    reviews = []
+    businesses, reviews = [], []
     base_date = datetime(2018, 1, 1)
 
     for i in range(250):
@@ -71,18 +96,10 @@ def generate_demo_dataset():
         lon = -75.1652 + random.uniform(-0.08, 0.08)
         cat = random.choice(subcategories)
         businesses.append({
-            "business_id": b_id,
-            "name": f"Philly Bistro {i}",
-            "city": TARGET_CITY,
-            "state": "PA",
-            "latitude": lat,
-            "longitude": lon,
-            "stars": round(random.uniform(2.0, 5.0), 1),
-            "review_count": 20,
-            "is_open": is_open,
-            "categories": cat
+            "business_id": b_id, "name": f"Philly Bistro {i}", "city": TARGET_CITY, "state": "PA",
+            "latitude": lat, "longitude": lon, "stars": round(random.uniform(2.0, 5.0), 1),
+            "review_count": 20, "is_open": is_open, "categories": cat
         })
-
         start_offset = random.randint(0, 800)
         lifespan_days = random.randint(120, 1400)
         for j in range(25):
@@ -93,16 +110,11 @@ def generate_demo_dataset():
             else:
                 stars = random.choices([1, 2, 3, 4, 5], weights=[10, 10, 15, 30, 35])[0]
                 text = random.choice(pos_texts if stars >= 4 else (neg_texts if stars <= 2 else neu_texts))
-
             reviews.append({
-                "review_id": f"rev_{i:04d}_{j:03d}",
-                "business_id": b_id,
-                "stars": stars,
-                "text": f"{text} (ref {j})",
-                "date": r_date.strftime("%Y-%m-%d %H:%M:%S")
+                "review_id": f"rev_{i:04d}_{j:03d}", "business_id": b_id,
+                "stars": stars, "text": f"{text} (ref {j})", "date": r_date.strftime("%Y-%m-%d %H:%M:%S")
             })
 
-    # Inject a few invalid rows so cleaning rules demonstrate exact before/after drops
     businesses.append({"business_id": "bad_coords", "name": "Null Cafe", "city": TARGET_CITY, "state": "PA",
                        "latitude": None, "longitude": -75.16, "stars": 3.0, "review_count": 1, "is_open": 1, "categories": "Restaurants"})
     reviews.append({"review_id": "empty_rev", "business_id": "biz_0001", "stars": 4, "text": "", "date": "2021-05-01 12:00:00"})
@@ -113,8 +125,6 @@ def generate_demo_dataset():
     with open(rev_path, "w", encoding="utf-8") as f:
         for r in reviews:
             f.write(json.dumps(r) + "\n")
-
-    print(f"[Demo] Generated {len(businesses)} businesses and {len(reviews)} reviews in {DATA_DIR}.")
     return biz_path, rev_path
 
 
@@ -124,11 +134,11 @@ def run_ingestion(use_demo=False):
     print(f"[Dask] Connected: {client}")
 
     biz_path, rev_path = generate_demo_dataset() if use_demo else download_kaggle_dataset()
+    metrics = {"target_city": TARGET_CITY, "target_category": TARGET_CATEGORY}
 
-    metrics = {}
-
-    # 1. Partitioned read of business.json
-    biz_ddf = dd.read_json(biz_path, lines=True, blocksize="64MB")
+    # 1. Partitioned read of business.json via Dask DataFrame
+    print("[Dask] Reading and cleaning business.json across partitions...")
+    biz_ddf = dd.read_json(biz_path, lines=True, blocksize="32MB")
     metrics["biz_raw_count"] = int(biz_ddf.shape[0].compute())
 
     # Rule 1: Drop null or out-of-range coordinates
@@ -139,55 +149,79 @@ def run_ingestion(use_demo=False):
     ]
     metrics["biz_after_coords"] = int(biz_valid_coords.shape[0].compute())
 
-    # Rule 2: Filter by target city and category family
+    # Rule 2: Filter by target city and category family + deduplicate
     biz_filtered = biz_valid_coords[
         (biz_valid_coords["city"].str.lower() == TARGET_CITY.lower()) &
         (biz_valid_coords["categories"].str.contains(TARGET_CATEGORY, case=False, na=False))
     ]
     biz_pdf = biz_filtered.compute().drop_duplicates(subset=["business_id"])
-    metrics["biz_after_city_category_dedup"] = len(biz_pdf)
-
+    metrics["biz_after_city_category_dedup"] = int(len(biz_pdf))
     valid_biz_ids = set(biz_pdf["business_id"].unique())
+    print(f"[Dask] Found {len(valid_biz_ids)} valid businesses in {TARGET_CITY} ({TARGET_CATEGORY}).")
 
-    # 2. Partitioned read of review.json
-    rev_ddf = dd.read_json(rev_path, lines=True, blocksize="64MB")
-    metrics["rev_raw_count"] = int(rev_ddf.shape[0].compute())
+    # 2. Memory-safe partitioned read of review.json via Dask
+    print("[Dask] Reading and filtering review.json in chunks...")
+    rev_raw_count = 0
+    rev_after_biz_filter = 0
+    rev_after_text_clean = 0
+    kept_chunks = []
 
-    # Rule 3: Filter reviews belonging to target businesses & non-empty text
-    rev_filtered = rev_ddf[rev_ddf["business_id"].isin(valid_biz_ids)]
-    rev_filtered = rev_filtered.dropna(subset=["review_id", "business_id", "stars", "text", "date"])
-    rev_filtered = rev_filtered[rev_filtered["text"].str.strip() != ""]
+    @dask.delayed
+    def clean_review_chunk(df_chunk, valid_ids):
+        raw_n = len(df_chunk)
+        sub = df_chunk[df_chunk["business_id"].isin(valid_ids)]
+        biz_n = len(sub)
+        sub = sub.dropna(subset=["review_id", "business_id", "stars", "text", "date"])
+        sub = sub[sub["text"].astype(str).str.strip() != ""]
+        clean_n = len(sub)
+        return raw_n, biz_n, clean_n, sub[["review_id", "business_id", "stars", "text", "date"]]
 
-    rev_pdf = rev_filtered.compute()
-    metrics["rev_after_text_and_join"] = len(rev_pdf)
+    delayed_tasks = []
+    for chunk in pd.read_json(rev_path, lines=True, chunksize=100_000):
+        delayed_tasks.append(clean_review_chunk(chunk, valid_biz_ids))
+        if len(delayed_tasks) >= 6:
+            results = dask.compute(*delayed_tasks)
+            for r_n, b_n, c_n, sdf in results:
+                rev_raw_count += r_n
+                rev_after_biz_filter += b_n
+                rev_after_text_clean += c_n
+                if len(sdf) > 0:
+                    kept_chunks.append(sdf)
+            delayed_tasks = []
+            current_kept = sum(len(c) for c in kept_chunks)
+            print(f"  ... scanned {rev_raw_count:,} raw reviews -> kept {current_kept:,} {TARGET_CITY} reviews so far")
+            if current_kept >= MAX_REVIEWS * 1.2:
+                break
 
-    # Rule 4: Deduplicate by review_id and cap at MAX_REVIEWS if needed
+    if delayed_tasks:
+        results = dask.compute(*delayed_tasks)
+        for r_n, b_n, c_n, sdf in results:
+            rev_raw_count += r_n
+            rev_after_biz_filter += b_n
+            rev_after_text_clean += c_n
+            if len(sdf) > 0:
+                kept_chunks.append(sdf)
+
+    rev_pdf = pd.concat(kept_chunks, ignore_index=True) if kept_chunks else pd.DataFrame()
+    metrics["rev_raw_scanned"] = int(rev_raw_count)
+    metrics["rev_after_city_business_join"] = int(rev_after_biz_filter)
+    metrics["rev_after_non_empty_text"] = int(rev_after_text_clean)
+
+    # Rule 4: Deduplicate by review_id and cap at MAX_REVIEWS
     rev_pdf = rev_pdf.drop_duplicates(subset=["review_id"])
+    metrics["rev_after_dedup"] = int(len(rev_pdf))
     if len(rev_pdf) > MAX_REVIEWS:
         rev_pdf = rev_pdf.sample(n=MAX_REVIEWS, random_state=42)
-    metrics["rev_final_count"] = len(rev_pdf)
+    metrics["rev_final_count"] = int(len(rev_pdf))
 
     print("[Dask] Cleaning Metrics (Before/After):", json.dumps(metrics, indent=2))
     with open(os.path.join(DATA_DIR, "cleaning_metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 
     # 3. Derive Sentiment Label (1-2: negative, 3: neutral, 4-5: positive)
-    def map_sentiment(stars):
-        if stars <= 2:
-            return "negative"
-        elif stars == 3:
-            return "neutral"
-        return "positive"
-
-    def map_sentiment_score(stars):
-        if stars <= 2:
-            return -1.0
-        elif stars == 3:
-            return 0.0
-        return 1.0
-
-    rev_pdf["sentiment"] = rev_pdf["stars"].apply(map_sentiment)
-    rev_pdf["sentiment_score"] = rev_pdf["stars"].apply(map_sentiment_score)
+    rev_pdf["stars"] = rev_pdf["stars"].astype(float)
+    rev_pdf["sentiment"] = rev_pdf["stars"].apply(lambda s: "negative" if s <= 2 else ("neutral" if s == 3 else "positive"))
+    rev_pdf["sentiment_score"] = rev_pdf["stars"].apply(lambda s: -1.0 if s <= 2 else (0.0 if s == 3 else 1.0))
     rev_pdf["is_negative"] = (rev_pdf["stars"] <= 2).astype(int)
     rev_pdf["date_dt"] = pd.to_datetime(rev_pdf["date"], errors="coerce")
     rev_pdf = rev_pdf.dropna(subset=["date_dt"])
@@ -205,18 +239,14 @@ def run_ingestion(use_demo=False):
     biz_merged["business_days"] = (
         (biz_merged["last_review"] - biz_merged["first_review"]).dt.total_seconds() / 86400.0
     ).round(2)
-    # Ensure minimum 1.0 day for businesses with reviews on the same day
     biz_merged["business_days"] = biz_merged["business_days"].apply(lambda d: max(float(d), 1.0))
-
-    # Event (is_open == 0 -> closure observed) & Censorship (is_open == 1 -> right-censored)
     biz_merged["event"] = (biz_merged["is_open"] == 0).astype(int)
     biz_merged["censored"] = (biz_merged["is_open"] == 1).astype(int)
 
-    # Extract subcategory as main_category for meaningful grouping
     def pick_main_category(cats):
         parts = [c.strip() for c in str(cats).split(",") if c.strip()]
         for p in parts:
-            if p.lower() != TARGET_CATEGORY.lower():
+            if p.lower() not in (TARGET_CATEGORY.lower(), "food", "nightlife", "bars"):
                 return p
         return parts[0] if parts else TARGET_CATEGORY
 
@@ -225,14 +255,21 @@ def run_ingestion(use_demo=False):
         lambda r: pgh.encode(float(r["latitude"]), float(r["longitude"]), precision=5), axis=1
     )
 
-    # Save cleaned parquet files to /data so Spark jobs read them fast
-    biz_Geo_Map = dict(zip(biz_merged["business_id"], biz_merged["geohash"]))
-    biz_Cat_Map = dict(zip(biz_merged["business_id"], biz_merged["main_category"]))
-    rev_pdf["geohash"] = rev_pdf["business_id"].map(biz_Geo_Map)
-    rev_pdf["main_category"] = rev_pdf["business_id"].map(biz_Cat_Map)
+    biz_geo_map = dict(zip(biz_merged["business_id"], biz_merged["geohash"]))
+    biz_cat_map = dict(zip(biz_merged["business_id"], biz_merged["main_category"]))
+    rev_pdf["geohash"] = rev_pdf["business_id"].map(biz_geo_map)
+    rev_pdf["main_category"] = rev_pdf["business_id"].map(biz_cat_map)
+    rev_pdf["date"] = rev_pdf["date"].astype(str)
 
-    biz_merged.to_parquet(os.path.join(DATA_DIR, "businesses_clean.parquet"), index=False, coerce_timestamps="us", allow_truncated_timestamps=True)
-    rev_pdf["date"] = rev_pdf["date"].astype(str); rev_pdf.drop(columns=["date_dt"]).to_parquet(os.path.join(DATA_DIR, "reviews_clean.parquet"), index=False, coerce_timestamps="us", allow_truncated_timestamps=True)
+    # Save Spark-compatible Parquet files (microsecond timestamps)
+    biz_merged.to_parquet(
+        os.path.join(DATA_DIR, "businesses_clean.parquet"),
+        index=False, coerce_timestamps="us", allow_truncated_timestamps=True
+    )
+    rev_pdf.drop(columns=["date_dt"]).to_parquet(
+        os.path.join(DATA_DIR, "reviews_clean.parquet"),
+        index=False, coerce_timestamps="us", allow_truncated_timestamps=True
+    )
 
     # 5. Batch Load into MongoDB with GeoJSON and 2dsphere index
     mongo_client = MongoClient(MONGO_URI)
@@ -266,7 +303,7 @@ def run_ingestion(use_demo=False):
             "neg_reviews": int(row["neg_reviews"])
         })
 
-    BATCH_SIZE = 1000
+    BATCH_SIZE = 2000
     for i in range(0, len(biz_docs), BATCH_SIZE):
         db.businesses.insert_many(biz_docs[i:i + BATCH_SIZE])
 
@@ -285,6 +322,6 @@ def run_ingestion(use_demo=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--demo", action="store_true", help="Run with synthetic Yelp demo data for fast testing")
+    parser.add_argument("--demo", action="store_true", help="Run with synthetic Yelp demo data")
     args = parser.parse_args()
     run_ingestion(use_demo=args.demo)
