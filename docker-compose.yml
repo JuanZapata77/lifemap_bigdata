@@ -112,7 +112,10 @@ services:
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: lifemap_tunnel
-    command: tunnel --no-autoupdate --url http://api:5000
+    command: tunnel --no-autoupdate --protocol http2 --url http://api:5000
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
       - api
     networks:
