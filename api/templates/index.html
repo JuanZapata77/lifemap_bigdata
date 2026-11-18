@@ -1,190 +1,344 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>LifeMap · Big Data IUE 2026-2</title>
+  <meta charset="UTF-8" />
+  <title>LifeMap · Entrega 1 & 2 (Geospatial, Streaming, Survival & Closure Risk)</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; }
-    .max-w { max-width: 1280px; margin: 0 auto; }
-    .grid { display: grid; gap: 24px; }
-    .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    @media (max-width: 1024px) { .lg-grid-3 { grid-template-columns: 1fr; } }
-    .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
-    .flex { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-    h1 { font-size: 24px; font-weight: bold; color: #34d399; margin: 0 0 4px 0; }
-    h2 { font-size: 18px; font-weight: 600; color: #34d399; margin: 0 0 12px 0; }
-    p { font-size: 14px; color: #94a3b8; margin: 0; }
-    input, textarea { width: 100%; background: #0f172a; border: 1px solid #475569; color: #fff; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; font-size: 14px; margin-top: 8px; }
-    button { background: #059669; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; margin-top: 8px; }
-    button:hover { background: #10b981; }
-    button.indigo { background: #4f46e5; } button.indigo:hover { background: #6366f1; }
-    button.amber { background: #d97706; } button.amber:hover { background: #f59e0b; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
-    th { color: #94a3b8; border-bottom: 1px solid #334155; padding-bottom: 8px; font-weight: 600; }
-    td { padding: 8px 0; border-bottom: 1px solid #1e293b; }
-    code { font-family: monospace; color: #fcd34d; background: #0f172a; padding: 2px 6px; border-radius: 4px; }
-    #map { height: 460px; border-radius: 8px; z-index: 1; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; display: flex; height: 100vh; overflow: hidden; }
+    #sidebar { width: 480px; background: #1e293b; padding: 14px; overflow-y: auto; border-right: 1px solid #334155; display: flex; flex-direction: column; gap: 12px; }
+    #main { flex: 1; display: flex; flex-direction: column; height: 100vh; }
+    #map { flex: 1; width: 100%; }
+    #bottom-charts { height: 270px; background: #0f172a; border-top: 1px solid #334155; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 10px 14px; }
+    .card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 11px; }
+    .chart-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; }
+    h1 { font-size: 1.15rem; color: #38bdf8; }
+    h2 { font-size: 0.86rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+    .badge { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; }
+    .bg-ok { background: #065f46; color: #34d399; }
+    .bg-warn { background: #7f1d1d; color: #f87171; }
+    .bg-info { background: #1e3a8a; color: #60a5fa; }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+    .stat-box { background: #1e293b; padding: 6px 8px; border-radius: 6px; border: 1px solid #334155; }
+    .stat-val { font-size: 1.05rem; font-weight: 700; color: #f8fafc; }
+    .stat-lbl { font-size: 0.68rem; color: #94a3b8; }
+    input, select, button { padding: 6px 8px; border-radius: 6px; border: 1px solid #475569; background: #1e293b; color: #fff; font-size: 0.8rem; }
+    button { background: #0284c7; border: none; font-weight: 600; cursor: pointer; }
+    button:hover { background: #0369a1; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+    th, td { text-align: left; padding: 4px 5px; border-bottom: 1px solid #334155; }
+    th { color: #94a3b8; }
+    .controls-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
   </style>
 </head>
 <body>
-  <div class="max-w" style="display: flex; flex-direction: column; gap: 24px;">
-    <!-- Header -->
-    <div class="card flex">
-      <div>
-        <h1>LifeMap: Business Reputation, Location & Survival</h1>
-        <p>Click anywhere on the Philadelphia map to query <code>$near</code> & <code>$geoNear</code></p>
+  <div id="sidebar">
+    <div>
+      <h1>LifeMap · Philadelphia E1 + E2</h1>
+      <p style="font-size:0.75rem; color:#94a3b8;">Kafka KRaft Streaming · 30d Geohash Windows · Kaplan-Meier · Closure Risk Alerts</p>
+      <div id="health-bar" style="margin-top:6px; display:flex; gap:5px; flex-wrap:wrap;"></div>
+    </div>
+
+    <div class="card">
+      <h2>
+        <span>1. Zone Summary & Map Layer Controls</span>
+        <button onclick="refreshAll()" style="padding:3px 8px; font-size:0.72rem;">↻ Sync Stream</button>
+      </h2>
+      <div class="controls-row">
+        <select id="cat-select" onchange="refreshAll()" style="flex:1;">
+          <option value="all">All Categories</option>
+          <option value="Italian">Italian</option>
+          <option value="Mexican">Mexican</option>
+          <option value="American">American</option>
+          <option value="Pizza">Pizza</option>
+          <option value="Chinese">Chinese</option>
+          <option value="Cafes">Cafes</option>
+        </select>
+        <label style="font-size:0.74rem; display:flex; align-items:center; gap:4px;">
+          <input type="checkbox" id="toggle-hotspots" checked onchange="refreshAll()" /> Hotspots (E2.4)
+        </label>
       </div>
-      <div id="health-badge" style="font-family: monospace; font-size: 12px; background: #0f172a; padding: 10px 14px; border-radius: 8px; border: 1px solid #334155;">
-        Checking /health...
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-val" id="z-total">-</div><div class="stat-lbl">Businesses Near</div></div>
+        <div class="stat-box"><div class="stat-val" id="z-rate">-</div><div class="stat-lbl">Closure Rate %</div></div>
+        <div class="stat-box"><div class="stat-val" id="z-hotspots">-</div><div class="stat-lbl">Active Hotspots</div></div>
       </div>
     </div>
 
-    <!-- Map & Sidebar -->
-    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px;" class="lg-grid-3">
-      <div class="card" style="padding: 12px;">
-        <div id="map"></div>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 20px;">
-        <!-- Zone Summary -->
-        <div class="card">
-          <h2>Zone Summary (<code>/zones/summary</code>)</h2>
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; margin-bottom: 12px;">
-            <div style="background: #0f172a; padding: 10px; border-radius: 8px;">
-              <div style="font-size: 11px; color: #94a3b8;">Businesses</div>
-              <div id="zone-total" style="font-size: 18px; font-weight: bold;">-</div>
-            </div>
-            <div style="background: #0f172a; padding: 10px; border-radius: 8px;">
-              <div style="font-size: 11px; color: #94a3b8;">Closure Rate</div>
-              <div id="zone-rate" style="font-size: 18px; font-weight: bold; color: #fb7185;">-</div>
-            </div>
-            <div style="background: #0f172a; padding: 10px; border-radius: 8px;">
-              <div style="font-size: 11px; color: #94a3b8;">Avg Sentiment</div>
-              <div id="zone-sent" style="font-size: 18px; font-weight: bold; color: #38bdf8;">-</div>
-            </div>
-          </div>
-          <div style="display: flex; gap: 8px;">
-            <input id="radius-input" type="number" value="3000" placeholder="Radius (m)" style="margin-top:0;">
-            <button onclick="loadMapData(currentLat, currentLon)">Update</button>
-          </div>
-          <button class="indigo" onclick="testPolygon()" style="width: 100%; margin-top: 10px;">Test Polygon (<code>POST /businesses/within</code>)</button>
-        </div>
-
-        <!-- Predictor -->
-        <div class="card">
-          <h2>Live Sentiment (<code>POST /predict</code>)</h2>
-          <textarea id="review-text" rows="2" placeholder="Type review...">Amazing food and super friendly staff!</textarea>
-          <button class="amber" onclick="predictSentiment()" style="width: 100%;">Classify Review</button>
-          <div id="predict-result" style="font-family: monospace; font-size: 12px; color: #cbd5e1; margin-top: 8px;"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- MapReduce Tables -->
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="lg-grid-3">
-      <div class="card">
-        <h2>MapReduce by Category (<code>/stats/closure</code>)</h2>
+    <div class="card">
+      <h2>
+        <span>2. Active Streaming Closure Alerts (E2.7)</span>
+        <span class="badge bg-warn" id="alert-badge">0 Alerts</span>
+      </h2>
+      <div style="max-height:145px; overflow-y:auto;">
         <table>
-          <thead><tr><th>Category</th><th>Biz</th><th>Closed</th><th>Days</th><th>Rate (%)</th></tr></thead>
-          <tbody id="cat-table"></tbody>
+          <thead><tr><th>Business</th><th>Cat</th><th>Neg%</th><th>Trend</th><th>Risk Prob</th></tr></thead>
+          <tbody id="alerts-tbody"></tbody>
         </table>
       </div>
-      <div class="card">
-        <h2>Top Geohash Cells (<code>/stats/closure</code>)</h2>
+    </div>
+
+    <div class="card">
+      <h2><span>3. Live Sentiment Inference (/predict · E1.6 & E2.3)</span></h2>
+      <div style="display:flex; gap:6px;">
+        <input id="pred-text" value="Cold food, rude staff and terrible service" style="flex:1;" />
+        <button onclick="runPredict()">Classify</button>
+      </div>
+      <div id="pred-res" style="margin-top:5px; font-size:0.76rem; color:#38bdf8;"></div>
+    </div>
+
+    <div class="card">
+      <h2><span>4. Spark MapReduce Closure Rates (E1.7)</span></h2>
+      <div style="max-height:120px; overflow-y:auto;">
         <table>
-          <thead><tr><th>Geohash</th><th>Biz</th><th>Closed</th><th>% Neg</th><th>Rate (%)</th></tr></thead>
-          <tbody id="geo-table"></tbody>
+          <thead><tr><th>Category</th><th>Closures</th><th>Biz-Days</th><th>Annual Rate %</th></tr></thead>
+          <tbody id="cat-tbody"></tbody>
         </table>
       </div>
     </div>
   </div>
 
+  <div id="main">
+    <div id="map"></div>
+    <div id="bottom-charts">
+      <div class="chart-card">
+        <h2>
+          <span>Visualization 3: Kaplan-Meier Survival Curves (E2.5)</span>
+          <select id="km-select" onchange="loadSurvivalChart()" style="padding:2px 6px; font-size:0.72rem;">
+            <option value="all">Compare Categories & Zones</option>
+            <option value="Italian">Italian</option>
+            <option value="Mexican">Mexican</option>
+            <option value="Pizza">Pizza</option>
+            <option value="Center_North_Philly">Zone: Center/North Philly</option>
+            <option value="South_West_Philly">Zone: South/West Philly</option>
+          </select>
+        </h2>
+        <div style="flex:1; position:relative;"><canvas id="kmChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h2>
+          <span>Visualization 4: 30-Day Window Negative % Evolution (E2.4)</span>
+          <span class="badge bg-info">Watermark: 7 Days</span>
+        </h2>
+        <div style="flex:1; position:relative;"><canvas id="evolChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+
   <script>
-    let currentLat = 39.9526, currentLon = -75.1652;
-    const map = L.map('map').setView([currentLat, currentLon], 12);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
-    let markersLayer = L.layerGroup().addTo(map);
-    let circleLayer = null;
+    let centerLat = 39.9526, centerLon = -75.1652;
+    const map = L.map('map').setView([centerLat, centerLon], 12);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap & CartoDB'
+    }).addTo(map);
+
+    const pinsLayer = L.layerGroup().addTo(map);
+    const hotspotsLayer = L.layerGroup().addTo(map);
+    let kmChartInstance = null;
+    let evolChartInstance = null;
 
     map.on('click', (e) => {
-      currentLat = e.latlng.lat; currentLon = e.latlng.lng;
-      loadMapData(currentLat, currentLon);
+      centerLat = e.latlng.lat;
+      centerLon = e.latlng.lng;
+      refreshAll();
     });
 
     async function loadHealth() {
-      const res = await fetch('/health');
-      const d = await res.json();
-      document.getElementById('health-badge').innerHTML =
-        `Status: <span style="color:#34d399; font-weight:bold;">${d.status}</span> | Commit: <span style="color:#fcd34d;">${d.commit_hash}</span> | Mongo: ${d.services.mongodb} | Spark: ${d.services.spark}`;
+      const r = await fetch('/health');
+      const d = await r.json();
+      const hb = document.getElementById('health-bar');
+      hb.innerHTML = Object.entries(d.services).map(([k, v]) =>
+        `<span class="badge ${v === 'UP' ? 'bg-ok' : 'bg-warn'}">${k.toUpperCase()}: ${v}</span>`
+      ).join('') +
+      `<span class="badge bg-info">Lag: ${d.consumer_lag}</span>` +
+      `<span class="badge bg-info">Commit: ${d.commit_hash}</span>`;
     }
 
-    async function loadMapData(lat, lon) {
-      const radius = parseFloat(document.getElementById('radius-input').value || 3000);
-      markersLayer.clearLayers();
-      if (circleLayer) map.removeLayer(circleLayer);
-      circleLayer = L.circle([lat, lon], { radius, color: '#10b981', fillOpacity: 0.08 }).addTo(map);
+    async function loadMapAndSummary() {
+      const cat = document.getElementById('cat-select').value;
+      const catParam = cat !== 'all' ? `&category=${encodeURIComponent(cat)}` : '';
 
-      const [nearRes, sumRes] = await Promise.all([
-        fetch(`/businesses/near?lat=${lat}&lon=${lon}&radius=${radius}`),
-        fetch(`/zones/summary?lat=${lat}&lon=${lon}&radius=${radius}`)
+      const [sumRes, nearRes, riskRes] = await Promise.all([
+        fetch(`/zones/summary?lat=${centerLat}&lon=${centerLon}&radius=4500`).then(r => r.json()),
+        fetch(`/businesses/near?lat=${centerLat}&lon=${centerLon}&radius=4500${catParam}`).then(r => r.json()),
+        fetch(`/risk/near?lat=${centerLat}&lon=${centerLon}&radius=6000`).then(r => r.json())
       ]);
-      const nearData = await nearRes.json();
-      const sumData = await sumRes.json();
 
-      document.getElementById('zone-total').textContent = sumData.total_businesses;
-      document.getElementById('zone-rate').textContent = sumData.annualized_closure_rate_pct + '%';
-      document.getElementById('zone-sent').textContent = sumData.avg_sentiment;
+      document.getElementById('z-total').innerText = sumRes.total_businesses;
+      document.getElementById('z-rate').innerText = sumRes.annualized_closure_rate_pct + '%';
 
-      (nearData.businesses || []).forEach(b => {
-        const [bLon, bLat] = b.location.coordinates;
-        const color = b.event === 1 ? '#fb7185' : '#38bdf8';
-        L.circleMarker([bLat, bLon], { radius: 6, color, fillColor: color, fillOpacity: 0.85 })
-          .bindPopup(`<b>${b.name}</b><br>Category: ${b.main_category}<br>Status: ${b.event === 1 ? 'CLOSED' : 'OPEN'}<br>Days: ${b.business_days}`)
-          .addTo(markersLayer);
+      const riskMap = {};
+      (riskRes.businesses || []).forEach(b => { riskMap[b.business_id] = b.risk_probability; });
+
+      pinsLayer.clearLayers();
+      L.circle([centerLat, centerLon], { radius: 4500, color: '#38bdf8', weight: 1, fillOpacity: 0.04 }).addTo(pinsLayer);
+
+      (nearRes.businesses || []).forEach(b => {
+        const [lon, lat] = b.location.coordinates;
+        const riskProb = riskMap[b.business_id] || 0;
+        const color = b.is_open === 0 ? '#ef4444' : (riskProb >= 0.55 ? '#f59e0b' : '#10b981');
+        L.circleMarker([lat, lon], { radius: 6, color, fillColor: color, fillOpacity: 0.85 })
+          .bindPopup(`<b>${b.name}</b><br/>Category: ${b.main_category}<br/>Stars: ${b.stars} | Days: ${b.business_days}<br/>Closure Risk Prob: <b>${(riskProb*100).toFixed(1)}%</b>`)
+          .addTo(pinsLayer);
       });
     }
 
-    async function testPolygon() {
-      const poly = { type: "Polygon", coordinates: [[[-75.20, 39.93], [-75.13, 39.93], [-75.13, 39.98], [-75.20, 39.98], [-75.20, 39.93]]] };
-      const res = await fetch('/businesses/within', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ polygon: poly }) });
-      const data = await res.json();
-      markersLayer.clearLayers();
-      if (circleLayer) map.removeLayer(circleLayer);
-      circleLayer = L.polygon([[39.93, -75.20], [39.93, -75.13], [39.98, -75.13], [39.98, -75.20]], { color: '#6366f1' }).addTo(map);
-      (data.businesses || []).forEach(b => {
-        const [bLon, bLat] = b.location.coordinates;
-        const color = b.event === 1 ? '#fb7185' : '#38bdf8';
-        L.circleMarker([bLat, bLon], { radius: 6, color, fillColor: color, fillOpacity: 0.85 }).bindPopup(`<b>${b.name}</b>`).addTo(markersLayer);
+    async function loadHotspotsAndEvolution() {
+      const r = await fetch(`/live/hotspots?lat=${centerLat}&lon=${centerLon}&radius=18000`);
+      const d = await r.json();
+      document.getElementById('z-hotspots').innerText = d.hotspots_count;
+
+      hotspotsLayer.clearLayers();
+      if (document.getElementById('toggle-hotspots').checked) {
+        const latestByGh = {};
+        (d.windows || []).forEach(w => {
+          if (!latestByGh[w.geohash] || w.window_index > latestByGh[w.geohash].window_index) {
+            latestByGh[w.geohash] = w;
+          }
+        });
+        Object.values(latestByGh).forEach(w => {
+          if (!w.geometry || !w.geometry.coordinates) return;
+          const coords = w.geometry.coordinates[0].map(c => [c[1], c[0]]);
+          const isHot = w.is_hotspot;
+          L.polygon(coords, {
+            color: isHot ? '#ef4444' : '#64748b',
+            weight: isHot ? 2 : 1,
+            fillColor: isHot ? '#ef4444' : '#38bdf8',
+            fillOpacity: isHot ? 0.28 : 0.08
+          }).bindPopup(
+            `<b>Geohash Cell: ${w.geohash}</b> ${isHot ? '<span style="color:#ef4444;">[HOTSPOT]</span>' : ''}<br/>` +
+            `Window: ${w.window_start} to ${w.window_end}<br/>` +
+            `Negative %: <b>${w.neg_pct}%</b> (Δ ${w.delta_neg_pct >= 0 ? '+' : ''}${w.delta_neg_pct}%)`
+          ).addTo(hotspotsLayer);
+        });
+      }
+
+      const evol = d.negative_evolution || [];
+      const ctx = document.getElementById('evolChart').getContext('2d');
+      if (evolChartInstance) evolChartInstance.destroy();
+      evolChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: evol.map(e => e.window_start),
+          datasets: [
+            {
+              label: 'Negative Review % (30d Window)',
+              data: evol.map(e => e.neg_pct),
+              borderColor: '#f87171',
+              backgroundColor: 'rgba(248,113,113,0.15)',
+              fill: true,
+              tension: 0.25
+            },
+            {
+              label: 'Hotspot Cells Count',
+              data: evol.map(e => e.hotspots),
+              borderColor: '#fbbf24',
+              borderDash: [4, 4],
+              tension: 0.2
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#cbd5e1', font: { size: 10 } } } },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 9 } } },
+            y: { ticks: { color: '#94a3b8', font: { size: 9 } } }
+          }
+        }
       });
     }
 
-    async function predictSentiment() {
-      const text = document.getElementById('review-text').value;
-      const res = await fetch('/predict', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text }) });
-      const d = await res.json();
-      document.getElementById('predict-result').textContent = `Prediction: ${d.predicted_sentiment?.toUpperCase()} (score: ${d.score})`;
+    async function loadAlerts() {
+      const r = await fetch(`/alerts?lat=${centerLat}&lon=${centerLon}&radius=18000`);
+      const d = await r.json();
+      document.getElementById('alert-badge').innerText = `${d.count} Active Alerts`;
+      const tbody = document.getElementById('alerts-tbody');
+      tbody.innerHTML = (d.alerts || []).slice(0, 25).map(a => `
+        <tr style="cursor:pointer;" onclick="map.setView([${a.location.coordinates[1]}, ${a.location.coordinates[0]}], 15)">
+          <td>${a.name}</td>
+          <td>${a.main_category}</td>
+          <td>${a.neg_pct}%</td>
+          <td style="color:${a.neg_trend_6m > 0 ? '#f87171' : '#34d399'};">${a.neg_trend_6m > 0 ? '+' : ''}${a.neg_trend_6m}%</td>
+          <td><span class="badge bg-warn">${(a.risk_probability * 100).toFixed(1)}%</span></td>
+        </tr>
+      `).join('');
     }
 
-    async function loadStats() {
-      const [catRes, geoRes] = await Promise.all([
-        fetch('/stats/closure?by=category&min_business_days=365'),
-        fetch('/stats/closure?by=geohash&min_business_days=365')
+    async function loadSurvivalChart() {
+      const sel = document.getElementById('km-select').value;
+      const r = await fetch(`/survival/${encodeURIComponent(sel)}`);
+      const d = await r.json();
+      const curves = d.curves ? d.curves : [d];
+
+      const palette = ['#38bdf8', '#34d399', '#fbbf24', '#f87171', '#a78bfa', '#f472b6', '#2dd4bf', '#fb923c'];
+      const datasets = curves.filter(c => c.curve && c.curve.length > 0).slice(0, 5).map((c, i) => ({
+        label: `${c.group_name} (n=${c.n_businesses}, censored=${c.total_censored})`,
+        data: c.curve.map(pt => ({ x: pt.days, y: pt.survival_prob })),
+        borderColor: palette[i % palette.length],
+        stepped: true,
+        fill: false,
+        pointRadius: 2
+      }));
+
+      const ctx = document.getElementById('kmChart').getContext('2d');
+      if (kmChartInstance) kmChartInstance.destroy();
+      kmChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          parsing: false,
+          plugins: { legend: { labels: { color: '#cbd5e1', font: { size: 9 } } } },
+          scales: {
+            x: { type: 'linear', title: { display: true, text: 'Business Lifespan (Days)', color: '#94a3b8', font: { size: 9 } }, ticks: { color: '#94a3b8', font: { size: 9 } } },
+            y: { min: 0, max: 1.05, title: { display: true, text: 'Survival S(t)', color: '#94a3b8', font: { size: 9 } }, ticks: { color: '#94a3b8', font: { size: 9 } } }
+          }
+        }
+      });
+    }
+
+    async function loadClosureStats() {
+      const r = await fetch('/stats/closure?min_days=365');
+      const d = await r.json();
+      document.getElementById('cat-tbody').innerHTML = (d.by_category || []).map(c => `
+        <tr>
+          <td>${c.key}</td>
+          <td>${c.closures}</td>
+          <td>${c.business_days}</td>
+          <td><b>${c.annualized_closure_rate_pct}%</b></td>
+        </tr>
+      `).join('');
+    }
+
+    async function runPredict() {
+      const text = document.getElementById('pred-text').value;
+      const r = await fetch('/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const d = await r.json();
+      document.getElementById('pred-res').innerText = `Prediction: ${d.sentiment.toUpperCase()} (${(d.probability*100).toFixed(1)}%) · Model: ${d.model}`;
+    }
+
+    async function refreshAll() {
+      await Promise.all([
+        loadHealth(),
+        loadMapAndSummary(),
+        loadHotspotsAndEvolution(),
+        loadAlerts(),
+        loadSurvivalChart(),
+        loadClosureStats()
       ]);
-      const catData = await catRes.json();
-      const geoData = await geoRes.json();
-
-      document.getElementById('cat-table').innerHTML = (catData.results || []).map(r =>
-        `<tr><td><b>${r.category}</b></td><td>${r.n_businesses}</td><td>${r.closures}</td><td>${r.business_days}</td><td style="color:#fb7185; font-weight:bold;">${r.closure_rate_pct}%</td></tr>`
-      ).join('');
-
-      document.getElementById('geo-table').innerHTML = (geoData.results || []).slice(0, 8).map(r =>
-        `<tr><td><code style="color:#fcd34d;">${r.geohash}</code></td><td>${r.n_businesses}</td><td>${r.closures}</td><td>${r.pct_negative_reviews}%</td><td style="color:#fb7185; font-weight:bold;">${r.closure_rate_pct}%</td></tr>`
-      ).join('');
     }
 
-    loadHealth(); loadMapData(currentLat, currentLon); loadStats();
+    refreshAll();
   </script>
 </body>
 </html>
