@@ -7,38 +7,26 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                script {
-                    env.GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                sh 'git rev-parse --short HEAD > commit.txt'
+            }
+        }
+        stage('Unit & E2 Streaming Smoke Tests') {
+            steps {
+                sh 'docker exec lifemap_dask_scheduler python /app/jobs/kafka_producer.py --limit 100 --fast'
+                sh 'docker exec lifemap_dask_scheduler python /app/jobs/stream_processor.py --batches 5'
+                sh 'docker exec lifemap_api pytest /app/test_suite.py -v'
+            }
+        }
+        stage('Deploy & Sync Commit') {
+            steps {
+                withCredentials([string(credentialsId: 'kaggle-key', variable: 'KAGGLE_KEY')]) {
+                    sh 'docker cp commit.txt lifemap_api:/app/commit.txt'
                 }
             }
         }
-        stage('Unit Tests (pytest)') {
+        stage('Smoke Test Live /health') {
             steps {
-                sh '''
-                    docker start lifemap_api || true
-                    docker cp api/test_suite.py lifemap_api:/app/api/test_suite.py
-                    docker exec -e PYTHONPATH=/app lifemap_api pytest /app/api/test_suite.py -v
-                '''
-            }
-        }
-        stage('Build & Deploy Compose') {
-            steps {
-                withCredentials([string(credentialsId: 'kaggle-creds', variable: 'KAGGLE_API_TOKEN')]) {
-                    sh '''
-                        echo "Kaggle Secret Text token verified in KAGGLE_API_TOKEN"
-                        echo "${GIT_COMMIT}" > commit.txt
-                        docker cp commit.txt lifemap_api:/app/api/commit.txt
-                        docker cp api/app.py lifemap_api:/app/api/app.py
-                        docker cp api/templates/index.html lifemap_api:/app/api/templates/index.html
-                    '''
-                }
-            }
-        }
-        stage('Smoke Test /health') {
-            steps {
-                sh '''
-                    docker exec lifemap_api curl -sf http://localhost:5000/health | grep "${GIT_COMMIT}"
-                '''
+                sh 'curl -sf http://api:5000/health | grep -q "kafka"'
             }
         }
     }
